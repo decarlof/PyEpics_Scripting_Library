@@ -564,6 +564,34 @@ def fnorm_slits_v(existing_center=True):
 def fnorm_slits_h(existing_center=True):
     fnorm_slits(existing_center,[63,64])
     epics.caput('7bmb1:Slit4Hsync.PROC',1)
+
+def fmove_to_imaging():
+    detector_x = epics.Motor('7bmb1:m5')
+    detector_y = epics.Motor('7bmb1:m6')
+    detector_x.move(49,relative=True)
+    detector_y.move(-2.7,relative=True)
+    
+def fmove_to_PIN():
+    detector_x = epics.Motor('7bmb1:m5')
+    detector_y = epics.Motor('7bmb1:m6')
+    detector_x.move(-49,relative=True)
+    detector_y.move(2.7,relative=True)
+
+def fadjust_mirror_table():
+    '''Adjusts for the tilt of the doubly reflected beam from the mono.
+    '''
+    propagation_dist = 5.75     #m
+    #Find mono crystal angles in degrees
+    theta_1 = epics.caget('7bma1:m4.VAL')
+    theta_2 = epics.caget('7bma1:m12.VAL')
+    #Compute the angle of the beam
+    beam_angle = np.radians(2 * theta_1 - 2 * theta_2)
+    print("Beam angle = " + str(beam_angle * 1000.0) + " mrad." )
+    vert_shift = np.tan(beam_angle) * propagation_dist * 1000.0
+    print("Vertical shift of beam is " + str(vert_shift) + " mm.")
+    #Move the vertical 
+    
+
         
 if __name__ == '__main__':
     bob = epics.PV('S:SRcurrentAI.VAL')
