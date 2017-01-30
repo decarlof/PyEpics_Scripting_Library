@@ -579,22 +579,79 @@ def fmove_to_PIN():
 
 def fadjust_mirror_table():
     '''Adjusts for the tilt of the doubly reflected beam from the mono.
+    
+    Baseline for zero position is both crystals at the same angle at 
+    25 mm vertical offset.
     '''
     propagation_dist = 5.75     #m
     #Find mono crystal angles in degrees
-    theta_1 = epics.caget('7bma1:m4.VAL')
-    theta_2 = epics.caget('7bma1:m12.VAL')
-    #Compute the angle of the beam
-    beam_angle = np.radians(2 * theta_1 - 2 * theta_2)
+    theta_1 = np.radians(epics.caget('7bma1:m4.VAL'))
+    theta_2 = np.radians(epics.caget('7bma1:m12.VAL'))
+    #Compute the angle of the beam and the shift caused by it
+    beam_angle = 2 * theta_1 - 2 * theta_2
     print("Beam angle = " + str(beam_angle * 1000.0) + " mrad." )
-    vert_shift = np.tan(beam_angle) * propagation_dist * 1000.0
-    print("Vertical shift of beam is " + str(vert_shift) + " mm.")
-    #Move the vertical 
+    print("Beam angle = " + str(np.rad2deg(beam_angle)) + " deg." )
+    vert_shift_angle = np.tan(beam_angle) * propagation_dist * 1000.0
+    print("Vertical shift due to angle is " + str(vert_shift_angle) + " mm.")
+    #Find the vertical shift caused by changing the crystal offset.
+    #Compute vertical offset of the crystals.
+    y_offset = epics.caget('7bma1:m8.VAL') - epics.caget('7bma1:m2.VAL')
+    #Find the z offset in mm
+    z_offset = epics.caget('7bma1:m9.VAL')
+    #Find the y offset: solving system of two equations in (z,y) for y
+    x_shift = (1.0 /(np.tan(2*theta_1) - np.tan(theta_2))
+                    * (y_offset - np.tan(theta_2) * z_offset))
+    print(x_shift)
+    y_beam_crystal2 = (np.tan(2*theta_1)/(np.tan(2*theta_1) - np.tan(theta_2))
+                       *(y_offset - np.tan(theta_2) * z_offset))
+    print("Y position of beam on crystal 2 = " + str(y_beam_crystal2) + " mm.")
+    vert_shift_pos = y_beam_crystal2 - 25.0
+    print("The vertical shift due to reflection position = " + str(vert_shift_pos) + " mm.")
+    total_vert_shift = vert_shift_angle + vert_shift_pos
+    print("The total vertical shift  = " + str(total_vert_shift) + " mm.")
     
-
+def fprep_for_alignment():
+    '''Prepares several motors for alignment.
+    '''
+    #Make sure all flags are out of the beam.
+    epics.caput('7bma1:m13.VAL',55.0)
+    epics.caput('7bma1:m14.VAL',50.0)
+    #Remove all WB filters.
+    epics.caput('7bma1:m13.VAL',0.7)
+    epics.caput('7bma1:m14.VAL',0.7)
+    #Move the alignment PIN into position.
+    epics.caput('7bmb1:m7.VAL',0.0,wait=True)
+    #Move the table to the right y.
+    fadjust_mirror_table()
+    #Open the slits in the y direction.
+    epics.caput('7bmb1:Slit4Vsize.VAL',15.0,wait=True)
+    #Are we already at zero angle, or nearly so
+    #If so, we are probably already out of the beam.
+    offset_v_pos = 0.0
+    if abs(epics.caget('7bmb1:m41.VAL') 
+            - epics.caget('7bmb1:m44.VAL')) > 0.2:
+        offset_v_pos = 1.0
+    offset_h_pos = 0.0
+    if abs(epics.caget('7bmb1:m45.VAL') 
+            - epics.caget('7bmb1:m48.VAL')) > 0.2:
+        offset_h_pos = 1.0
+    
+    #Flatten the mirrors and make the angles zero, move out of beam.
+    v_mirror_average = (epics.caget('7bmb1:m41.VAL') 
+                        + epics.caget('7bmb1:m44.VAL')) / 2.0
+    h_mirror_average = (epics.caget('7bmb1:m45.VAL') 
+                        + epics.caget('7bmb1:m48.VAL')) / 2.0
+    epics.caput('7bmb1:m41.VAL',v_mirror_average - offset_v_pos)
+    epics.caput('7bmb1:m44.VAL',v_mirror_average - offset_v_pos)
+    epics.caput('7bmb1:m45.VAL',h_mirror_average - offset_h_pos)
+    epics.caput('7bmb1:m48.VAL',h_mirror_average - offset_h_pos)
+    for i in [42,43,46,47]:
+        epics.caput('7bmb1:m'+str(i)+'.VAL',0.0)
+    
         
 if __name__ == '__main__':
     bob = epics.PV('S:SRcurrentAI.VAL')
     print(bob.value)
     print(A_shutter_closed_PV.value)
+    fadjust_mirror_table()
 
