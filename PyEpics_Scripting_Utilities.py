@@ -42,14 +42,19 @@ def fmonitored_action(action_pv,readback_pv,action_value=1,desired_readback=1,sl
     This is useful for beamline shutters in particular, since a put_complete
     doesn't work to monitor them.
     Inputs:
-    action_pv: epics.PV object that should be activated
+    action_pv: epics.PV object or string of a PV name that should be activated
     readback_pv: epics.PV object to monitor to see that action is complete
     action_value: value to put to action_pv
     desired_readback: value we desire on the readback
     sleep_time: time to sleep between polls of the readback_pv
     '''
     waiting = 0
-    action_pv.put(action_value)
+    #If this is already a PV object, just put a value to it.
+    if isinstance(action_pv,epics.pv.PV):
+        action_pv.put(action_value)
+    #If it isn't already a PV, assume it's a string and just caput
+    else:
+        epics.caput(action_pv,action_value)
     while waiting < 30:
         time.sleep(1)
         waiting += 1
@@ -588,7 +593,7 @@ def fadjust_mirror_table():
     theta_1 = np.radians(epics.caget('7bma1:m4.VAL'))
     theta_2 = np.radians(epics.caget('7bma1:m12.VAL'))
     #Compute the angle of the beam and the shift caused by it
-    beam_angle = 2 * theta_1 - 2 * theta_2
+    beam_angle = 2 * (theta_2 - theta_1)
     print("Beam angle = " + str(beam_angle * 1000.0) + " mrad." )
     print("Beam angle = " + str(np.rad2deg(beam_angle)) + " deg." )
     vert_shift_angle = np.tan(beam_angle) * propagation_dist * 1000.0
@@ -607,8 +612,8 @@ def fadjust_mirror_table():
     print("Y position of beam on crystal 2 = " + str(y_beam_crystal2) + " mm.")
     vert_shift_pos = y_beam_crystal2 - 25.0
     print("The vertical shift due to reflection position = " + str(vert_shift_pos) + " mm.")
-    total_vert_shift = vert_shift_angle + vert_shift_pos
-    print("The total vertical shift  = " + str(total_vert_shift) + " mm.")
+    total_vert_shift = vert_shift_angle + vert_shift_pos + 25.0
+    print("The desired table vertical position  = " + str(total_vert_shift) + " mm.")
     
 def fprep_for_alignment():
     '''Prepares several motors for alignment.
@@ -617,8 +622,8 @@ def fprep_for_alignment():
     epics.caput('7bma1:m13.VAL',55.0)
     epics.caput('7bma1:m14.VAL',50.0)
     #Remove all WB filters.
-    epics.caput('7bma1:m13.VAL',0.7)
-    epics.caput('7bma1:m14.VAL',0.7)
+    epics.caput('7bma1:m15.VAL',0.7)
+    epics.caput('7bma1:m16.VAL',0.7)
     #Move the alignment PIN into position.
     epics.caput('7bmb1:m7.VAL',0.0,wait=True)
     #Move the table to the right y.
@@ -647,6 +652,18 @@ def fprep_for_alignment():
     epics.caput('7bmb1:m48.VAL',h_mirror_average - offset_h_pos)
     for i in [42,43,46,47]:
         epics.caput('7bmb1:m'+str(i)+'.VAL',0.0)
+
+def fcompute_Compton_energy(incident_keV,angle=90):
+    '''Computes the energy of the Compton scattering.
+
+    Inputs:
+    incident_keV: incident photon energy in keV
+    angle: observation angle in degrees
+    '''
+    Compton_wavelength = 2.43e-2 #angstroms, from Wikipedia
+    E_to_angstroms = 12.398 #angstrom-keV
+    return E_to_angstroms / (E_to_angstroms / incident_keV 
+                            + Compton_wavelength * (1 - np.cos(np.radians(angle))))
     
         
 if __name__ == '__main__':
