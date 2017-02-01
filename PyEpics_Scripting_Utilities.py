@@ -10,6 +10,7 @@ import time
 import math
 import logging
 
+#Add a comment just for fun
 SR_current_PV = epics.PV('S:SRcurrentAI.VAL')
 A_shutter_closed_PV = epics.PV('PB:07BM:STA_A_FES_CLSD_PL.VAL')
 B_shutter_closed_PV = epics.PV('PB:07BM:STA_B_SBS_CLSD_PL.VAL')
