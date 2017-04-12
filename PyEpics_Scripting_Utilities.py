@@ -356,7 +356,7 @@ def CavitationPSOFly(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:scan1',s
     epics.caput(asynRec+'.BOUT', 'PSOCONTROL %s OFF' % axis, wait=True, timeout=300.0)
     epics.caput(motor+'.VELO', oldVelo, wait=True, timeout=300.0)
 
-def CavitationPSO_SetupAerotech(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:scan1',speed=1,delta=.1,start=0,end=1,asynRec='7bmb1:PSOFly1:cmdWriteRead', axis='Z', PSOInput=3,encoder_multiply=1e5):
+def PSO_SetupAerotech(motor='7bmb1:aero:m1',speed=1,delta=.1,start=0,end=1,asynRec='7bmb1:PSOFly1:cmdWriteRead', axis='Z', PSOInput=3,encoder_multiply=1e5):
     '''Script to set up the Ensemble for PSO output.
     '''
     #Make sure the PSO control is off
@@ -393,22 +393,30 @@ def CavitationPSO_SetupAerotech(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bm
 
     ## initPSO: commands to the Ensemble to control PSO output.
     # Everything but arming and setting the positions for which pulses will occur.
+    #Set the output to occur from the I/O terminal on the controller
     epics.caput(asynRec+'.BOUT', 'PSOOUTPUT %s CONTROL 1' % axis, wait=True, timeout=300.0)
     time.sleep(0.05)
+    #Set a pulse 10 us long, 20 us total duration, so 10 us on, 10 us off
     epics.caput(asynRec+'.BOUT', 'PSOPULSE %s TIME 20,10' % axis, wait=True, timeout=300.0)
     time.sleep(0.05)
+    #Set the pulses to only occur in a specific window
     epics.caput(asynRec+'.BOUT', 'PSOOUTPUT %s PULSE WINDOW MASK' % axis, wait=True, timeout=300.0)
     time.sleep(0.05)
+    #Set which encoder we will use.  3 = the MXH (encoder multiplier) input, which is what we generally want
     epics.caput(asynRec+'.BOUT', 'PSOTRACK %s INPUT %d' % (axis, PSOInput), wait=True, timeout=300.0)
     time.sleep(0.05)
+    #Set the distance between pulses.  Manual says this should be in counts, but units seems to work
     epics.caput(asynRec+'.BOUT', 'PSODISTANCE %s FIXED %f UNITS' % (axis,delta), wait=True, timeout=300.0)
     time.sleep(0.05)
+    #Which encoder is being used to calculate whether we are in the window.  1 for single axis
     epics.caput(asynRec+'.BOUT', 'PSOWINDOW %s 1 INPUT %d' % (axis,PSOInput), wait=True, timeout=300.0)
     time.sleep(0.05)
 
+    #Calculate window function parameters.  Must be in encoder counts, and is 
+    #referenced from the stage location when we enabled the PSO (i.e., the
+    #taxi position). 
     #We want pulses to start at start - delta/2.  
     range_start = taxiDist * overall_sense
-    #range_start = (start - delta/2.0 * user_direction) * overall_sense
     range_length = (math.fabs(start-end) + delta) * overall_sense
     #The start of the PSO window must be < end.  Handle this.
     if overall_sense > 0:
@@ -426,14 +434,14 @@ def CavitationPSO_SetupAerotech(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bm
     #Set motor speed
     epics.caput(motor+'.VELO', speed, wait=True, timeout=300.0)
 
-def CavitationPSO_SetupScan(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:scan1',speed=1,delta=.1, start=0,end=1):
+def PSO_SetupScan(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:scan1',speed=1,delta=.1, start=0,end=1):
     '''Script to set up the scan for Ensemble PSO fly scans.
     '''
     #Get motor accel time in s
     motor_accl = epics.caget(motor+'.ACCL')
     #Figure out whether motion is in positive or negative direction in user coordinates
     user_direction = 1 if end > start else -1
-    #Get the distance needed for acceleration = 1/2 a t^2 = 1/2 * v * t
+    #Get the distance needed for acceleration = 1/2 a t^2 = 1/2 * v * a
     accelDist = motor_accl*speed/2                    
     #Make taxi distance an integral number of measurement deltas >= accel distance
     #Add 1/2 of a delta, since we want integration centered on start and end.
@@ -464,9 +472,63 @@ def CavitationPSO_SetupScan(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:s
     epics.caput('7bmb1:userArrayCalc1.CALC','IX*A+B',wait=True,timeout=300.0)
     epics.caput('7bmb1:userArrayCalc1.PROC',1, wait=True, timeout=300.0)
 
-def CavitationPSO_Cleanup(motor='7bmb1:aero:m1',asynRec='7bmb1:PSOFly1:cmdWriteRead', 
+def PSO_SetupScan_Imaging(motor='7bmb1:aero:m1',trig_root='7bmPG1:cam1',scan='7bmb1:scan1',speed=1,delta=.1, start=0,end=1):
+    '''Script to set up the scan for Ensemble PSO fly scans.
+    '''
+    #Get motor accel time in s
+    motor_accl = epics.caget(motor+'.ACCL')
+    #Figure out whether motion is in positive or negative direction in user coordinates
+    user_direction = 1 if end > start else -1
+    #Get the distance needed for acceleration = 1/2 a t^2 = 1/2 * v * a
+    accelDist = motor_accl*speed/2                    
+    #Make taxi distance an integral number of measurement deltas >= accel distance
+    #Add 1/2 of a delta, since we want integration centered on start and end.
+    taxiDist = math.ceil(accelDist/delta)*delta
+    taxiPos = start-(taxiDist+0.5*delta)*user_direction
+    motorEnd = end+accelDist*user_direction
+    #Increase range very slightly to avoid roundoff issues
+    num_points = math.floor(math.fabs(start-end)*1.0001/delta)+1
+    print taxiPos,motorEnd,num_points
+    
+    #Set up the scan record parameters
+    epics.caput(scan+'.P1SP',taxiPos, wait=True, timeout=300.0)
+    epics.caput(scan+'.P1EP',motorEnd, wait=True, timeout=300.0)
+    epics.caput(scan+'.NPTS',num_points, wait=True, timeout=300.0)
+    epics.caput(scan+'.P1SM', 2, wait=True, timeout=300.0)
+    epics.caput(scan+'.T1PV',trig_root+':Acquire', wait=True, timeout=300.0)
+    for i in [2,3,4]:
+        epics.caput(scan+'.T'+str(i)+'PV',"", wait=True, timeout=300.0)
+    epics.caput(scan+'.ACQT',1, wait=True, timeout=300.0)
+
+    #Set up areaDetector to have the right number of images
+    epics.caput(trig_root+':NumImages',num_points, wait=True, timeout=300.0)
+    epics.caput(trig_root+':ImageMode',1, wait=True, timeout=300.0)
+    return
+
+def PSO_Initial_Setup(motor='7bmb1:aero:m2',mcs='7bmb1:3820',scan='7bmb1:scan1',speed=1,delta=.1,start=0,end=1,asynRec='7bmb1:PSOFly2:cmdWriteRead', axis='X', PSOInput=3,encoder_multiply=1e5):
+    '''Performs setup on controller and the scan record.
+    '''
+    PSO_SetupAerotech(motor,speed,delta,start,end,asynRec,axis,PSOInput,encoder_multiply)
+    PSO_SetupScan(motor,mcs,scan,speed,delta,start,end)
+
+def PSO_Initial_Setup_X(scan='7bmb1:scan1',speed=1,delta=.1,start=0,end=1):
+    '''Performs initial setup of controller and scan record for horizontal fly scans.
+    '''
+    PSO_Initial_Setup('7bmb1:aero:m2','7bmb1:3820',scan,speed,delta,start,end,'7bmb1:PSOFly2:cmdWriteRead', axis='X', PSOInput=3,encoder_multiply=1e5)
+
+def PSO_Initial_Setup_Y(scan='7bmb1:scan1',speed=1,delta=.1,start=0,end=1):
+    '''Performs initial setup of controller and scan record for vertical fly scans.
+    '''
+    PSO_Initial_Setup('7bmb1:aero:m1','7bmb1:3820',scan,speed,delta,start,end,'7bmb1:PSOFly1:cmdWriteRead', axis='Z', PSOInput=3,encoder_multiply=1e5)
+
+def PSO_Initial_Setup_Theta(scan='7bmb1:scan1',speed=1,delta=.1,start=0,end=1):
+    '''Performs initial setup of controller and scan record for vertical fly scans.
+    '''
+    PSO_Initial_Setup('7bmb1:aero:m3','7bmb1:3820',scan,speed,delta,start,end,'7bmb1:PSOFly3:cmdWriteRead', axis='A', PSOInput=3,encoder_multiply=float(2**15)/0.36)
+
+def PSO_Cleanup(motor='7bmb1:aero:m1',asynRec='7bmb1:PSOFly1:cmdWriteRead', 
                             axis='Z', oldVelo=5):
-    '''Clean up after a fly scan is done.
+    '''Perform actions after the fly motion is done to prepare to move back.
     '''
     print "Motion Done"
     #Turn PSO off and put the motor speed back to its old value.
@@ -474,28 +536,37 @@ def CavitationPSO_Cleanup(motor='7bmb1:aero:m1',asynRec='7bmb1:PSOFly1:cmdWriteR
     epics.caput(asynRec+'.BOUT', 'PSOCONTROL %s OFF' % axis, wait=True, timeout=300.0)
     epics.caput(motor+'.VELO', oldVelo, wait=True, timeout=300.0)
 
-def CavitationPSO_Monitor_Daemon(setup_busy='7bmb1:busy1',cleanup_busy='7bmb1:busy2',scan_setup_busy='7bmb1:busy3',
-                                motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:scan1',speed=1,delta=.1, 
-                                start=0,end=1,asynRec='7bmb1:PSOFly1:cmdWriteRead',axis='Z', PSOInput=3,encoder_multiply=1e5):
+def PSO_Monitor_Daemon(setup_busy='7bmb1:busy1',cleanup_busy='7bmb1:busy2',scan_setup_busy='7bmb1:busy3',
+                                motor='7bmb1:aero:m2',mcs='7bmb1:3820',scan='7bmb1:scan1',
+                                asynRec='7bmb1:PSOFly2:cmdWriteRead',axis='X', PSOInput=3,encoder_multiply=1e5):
     '''Code the looks for changes in the busy records to control PSO fly scanning.
+        Uses the user variables to control speed, start, end, delta, and the retrace speed.
     '''
-    setup_busy_PV = epics.PV('7bmb1:busy1')
-    cleanup_busy_PV = epics.PV('7bmb1:busy2')
-    scan_setup_busy_PV = epics.PV('7bmb1:busy3')
+    PSO_setup_busy_PV = epics.PV(setup_busy)
+    cleanup_busy_PV = epics.PV(cleanup_busy)
+    scan_setup_busy_PV = epics.PV(scan_setup_busy)
+    speed_PV = epics.PV('7bmb1:var:float1')
+    delta_PV = epics.PV('7bmb1:var:float2')
+    start_PV = epics.PV('7bmb1:var:float3')
+    end_PV = epics.PV('7bmb1:var:float4')
+    retrace_PV = epics.PV('7bmb1:var:float5')
     counter = 0
     while True:
-        if setup_busy_PV.value == 1:
+        if PSO_setup_busy_PV.value == 1:
             #Do this twice, because for whatever reason it sometimes doesn't work the first time
-            CavitationPSO_SetupAerotech(motor,mcs,scan,speed,delta, start,end,asynRec,axis,PSOInput,encoder_multiply)
-            CavitationPSO_SetupAerotech(motor,mcs,scan,speed,delta, start,end,asynRec,axis,PSOInput,encoder_multiply)
-            setup_busy_PV.value = 0
+            PSO_SetupAerotech(motor,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value,asynRec,axis,PSOInput,encoder_multiply)
+            PSO_SetupAerotech(motor,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value,asynRec,axis,PSOInput,encoder_multiply)
+            PSO_setup_busy_PV.value = 0
             time.sleep(0.05)
         elif cleanup_busy_PV.value == 1:
-            CavitationPSO_Cleanup(motor,asynRec,axis)
+            PSO_Cleanup(motor,asynRec,axis,retrace_PV.value)
             cleanup_busy_PV.value = 0
             time.sleep(0.05)
         if scan_setup_busy_PV.value == 1:
-            CavitationPSO_SetupScan(motor,mcs,scan,speed,delta,start,end)
+            PSO_SetupScan(motor,mcs,scan,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value)
             scan_setup_busy_PV.value = 0
         if counter == 10000:
             print "Looking for busys at time " + time.strftime('%H:%M:%S',time.localtime())
@@ -504,6 +575,46 @@ def CavitationPSO_Monitor_Daemon(setup_busy='7bmb1:busy1',cleanup_busy='7bmb1:bu
             counter += 1
         time.sleep(0.001)
 
+def PSO_Monitor_Daemon_Tomo(setup_busy='7bmb1:busy1',cleanup_busy='7bmb1:busy2',scan_setup_busy='7bmb1:busy3',
+                                motor='7bmb1:aero:m3',trig_root = '7bmPG1:cam1',scan='7bmb1:scan1',
+                                asynRec='7bmb1:PSOFly3:cmdWriteRead',axis='A', PSOInput=3,encoder_multiply=float(2**15)/0.36):
+    '''Does PSO_Monitor_Daemon for tomography fly scans.
+    '''
+    PSO_setup_busy_PV = epics.PV(setup_busy)
+    cleanup_busy_PV = epics.PV(cleanup_busy)
+    scan_setup_busy_PV = epics.PV(scan_setup_busy)
+    speed_PV = epics.PV('7bmb1:var:float1')
+    delta_PV = epics.PV('7bmb1:var:float2')
+    start_PV = epics.PV('7bmb1:var:float3')
+    end_PV = epics.PV('7bmb1:var:float4')
+    retrace_PV = epics.PV('7bmb1:var:float5')
+    counter = 0
+    while True:
+        if PSO_setup_busy_PV.value == 1:
+            #Do this twice, because for whatever reason it sometimes doesn't work the first time
+            PSO_SetupAerotech(motor,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value,asynRec,axis,PSOInput,encoder_multiply)
+            PSO_SetupAerotech(motor,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value,asynRec,axis,PSOInput,encoder_multiply)
+            fopen_A_shutter()
+            PSO_setup_busy_PV.value = 0
+            time.sleep(0.05)
+        elif cleanup_busy_PV.value == 1:
+            PSO_Cleanup(motor,asynRec,axis,retrace_PV.value)
+            fclose_A_shutter()
+            cleanup_busy_PV.value = 0
+            time.sleep(0.05)
+        if scan_setup_busy_PV.value == 1:
+            PSO_SetupScan_Imaging(motor,trig_root,scan,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value)
+            scan_setup_busy_PV.value = 0
+        if counter == 10000:
+            print "Looking for busys at time " + time.strftime('%H:%M:%S',time.localtime())
+            counter = 0
+        else:
+            counter += 1
+        time.sleep(0.001)
+    
             
 
 def fnorm_v_mirror_translation(new_value=0):
@@ -570,6 +681,11 @@ def fnorm_slits_v(existing_center=True):
 def fnorm_slits_h(existing_center=True):
     fnorm_slits(existing_center,[63,64])
     epics.caput('7bmb1:Slit4Hsync.PROC',1)
+
+def fnorm_detector():
+    '''Sets the detector x and y stages to 0 in user coordinates.
+    '''
+    fnorm_slits(False,[5,6])
 
 def fmove_to_imaging():
     detector_x = epics.Motor('7bmb1:m5')
@@ -665,7 +781,29 @@ def fcompute_Compton_energy(incident_keV,angle=90):
     E_to_angstroms = 12.398 #angstrom-keV
     return E_to_angstroms / (E_to_angstroms / incident_keV 
                             + Compton_wavelength * (1 - np.cos(np.radians(angle))))
+
+def fcompute_energy_Si220(input_angle_deg,order=1):
+    '''Computes the diffraction energy for Si(220) given angle in deg.
     
+    Inputs:
+    input_angle_deg: angle of crystal to beam in degrees
+    order: order of diffraction
+    Output:
+    Energy of x-ray beam in keV.
+    '''
+    return fcompute_energy_Bragg(input_angle_deg,order,3.8403)
+
+def fcompute_energy_Bragg(input_angle_deg,order,crystal_2d):
+    '''Computes the diffraction energy for a crystal given angle in deg.
+    
+    Inputs:
+    input_angle_deg: angle of crystal to beam in degrees
+    order: order of diffraction
+    crystal_2d: crystal 2d spacing.
+    Output:
+    Energy of x-ray beam in keV.
+    '''
+    return 12.398 * order / crystal_2d / np.sin(np.radians(input_angle_deg))
         
 if __name__ == '__main__':
     bob = epics.PV('S:SRcurrentAI.VAL')
