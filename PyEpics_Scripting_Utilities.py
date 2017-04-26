@@ -131,6 +131,7 @@ def fsimple_repeated_scan(num_times,scan_name='7bmb1:scan1'):
         fcheck_for_good_beam(epics.PV(scan_name+'.scanPause.VAL'),0,1)
         #Start the scan
         epics.caput(scan_name+'.EXSC',1,wait=False)
+        time.sleep(1.0)
         #Check if the scan is done
         while scan_busy.value:
             #Sleep a little
@@ -614,6 +615,57 @@ def PSO_Monitor_Daemon_Tomo(setup_busy='7bmb1:busy1',cleanup_busy='7bmb1:busy2',
         else:
             counter += 1
         time.sleep(0.001)
+
+def PSO_Monitor_Daemon_Tomo_Fly(setup_busy='7bmb1:busy1',cleanup_busy='7bmb1:busy2',scan_setup_busy='7bmb1:busy3',
+                                motor='7bmb1:aero:m3',trig_root = '7bmPG1:cam1',scan='7bmb1:scan1',
+                                asynRec='7bmb1:PSOFly3:cmdWriteRead',axis='A', PSOInput=3,encoder_multiply=float(2**15)/0.36):
+    '''Does PSO_Monitor_Daemon for tomography fly scans.
+    '''
+    PSO_setup_busy_PV = epics.PV(setup_busy)
+    cleanup_busy_PV = epics.PV(cleanup_busy)
+    scan_setup_busy_PV = epics.PV(scan_setup_busy)
+    speed_PV = epics.PV('7bmb1:var:float1')
+    delta_PV = epics.PV('7bmb1:var:float2')
+    start_PV = epics.PV('7bmb1:var:float3')
+    end_PV = epics.PV('7bmb1:var:float4')
+    retrace_PV = epics.PV('7bmb1:var:float5')
+    counter = 0
+    while True:
+        if PSO_setup_busy_PV.value == 1:
+            #Do this twice, because for whatever reason it sometimes doesn't work the first time
+            PSO_SetupAerotech(motor,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value,asynRec,axis,PSOInput,encoder_multiply)
+            PSO_SetupAerotech(motor,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value,asynRec,axis,PSOInput,encoder_multiply)
+            fopen_A_shutter()
+            time.sleep(0.5)
+            #Set up the HDF plugin to stream images to HDF5.
+            epics.caput('7bmPG1:HDF1:FileWriteMode',2,wait=True)
+            epics.caput('7bmPG1:HDF1:AutoSave',1,wait=True)
+            num_images = int(epics.caget('7bmPG1:cam1:NumImages'))
+            epics.caput('7bmPG1:HDF1:NumCapture',num_images,wait=True)
+            epics.caput('7bmPG1:HDF1:Capture',1,wait=False)
+            #Make sure camera is on external trigger mode and started.
+            epics.caput('7bmPG1:cam1:ImageMode',1,wait=True)
+            epics.caput('7bmPG1:cam1:TriggerMode',1,wait=True)
+            PSO_setup_busy_PV.value = 0
+            time.sleep(0.05)
+        elif cleanup_busy_PV.value == 1:
+            PSO_Cleanup(motor,asynRec,axis,retrace_PV.value)
+            fclose_A_shutter()
+            epics.caput('7bmb1:aero:m3.VAL',0)
+            cleanup_busy_PV.value = 0
+            time.sleep(0.05)
+        if scan_setup_busy_PV.value == 1:
+            PSO_SetupScan_Imaging(motor,trig_root,scan,speed_PV.value,delta_PV.value,
+                                start_PV.value,end_PV.value)
+            scan_setup_busy_PV.value = 0
+        if counter == 10000:
+            print "Looking for busys at time " + time.strftime('%H:%M:%S',time.localtime())
+            counter = 0
+        else:
+            counter += 1
+        time.sleep(0.001)
     
             
 
@@ -804,10 +856,25 @@ def fcompute_energy_Bragg(input_angle_deg,order,crystal_2d):
     Energy of x-ray beam in keV.
     '''
     return 12.398 * order / crystal_2d / np.sin(np.radians(input_angle_deg))
+
+def fprep_for_tomo_alignment():
+    '''Prepares the data acquisition to look at sample.
+    '''
+    #Turn off image saving
+    epics.caput('7bmPG1:HDF1:Capture',0,wait=True)
+    time.sleep(0.1)
+    epics.caput('7bmPG1:HDF1:AutoSave',0,wait=True)
+    time.sleep(0.1)
+    #Set the camera to internal trigger, Continuous trigger mode
+    epics.caput('7bmPG1:cam1:TriggerMode',0,wait=True)
+    time.sleep(0.1)
+    epics.caput('7bmPG1:cam1:ImageMode',2,wait=True)
+    time.sleep(0.1)
+    #Start taking images
+    epics.caput('7bmPG1:cam1:Acquire',1, wait=False)
         
 if __name__ == '__main__':
     bob = epics.PV('S:SRcurrentAI.VAL')
     print(bob.value)
     print(A_shutter_closed_PV.value)
-    fadjust_mirror_table()
 
