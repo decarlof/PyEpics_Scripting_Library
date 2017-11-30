@@ -382,7 +382,7 @@ def finit_slits(top=57,bottom=58,inside=59,outside=60,prefix='7bmb1:m',size=15):
         #Init motor
         finit_motor(motor_number,prefix=prefix)
         #Move the top and inside blades to open the slits
-        if motor_number == top or motor_number == bottom:
+        if motor_number == top or motor_number == outside:
             motor_obj.move(size,wait=True)
 
 def fnorm_v_mirror_translation(new_value=0):
