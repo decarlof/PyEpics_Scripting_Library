@@ -10,7 +10,7 @@ import time
 import math
 import logging
 
-#Add a comment just for fun
+#Global variables
 SR_current_PV = epics.PV('S:SRcurrentAI.VAL')
 A_shutter_closed_PV = epics.PV('PB:07BM:STA_A_FES_CLSD_PL.VAL')
 B_shutter_closed_PV = epics.PV('PB:07BM:STA_B_SBS_CLSD_PL.VAL')
@@ -27,19 +27,15 @@ def fwait_for_PV_completion(monitored_PV,middle_functions=[],middle_args=[[]],po
     middle_args: list of lists of arguments to pass to middle_functions
     poll_time: time between polls to see if monitored_PV has completed.
     '''
-    waiting = True
-    while waiting:
-        if monitored_PV.put_complete:
-            break
+    while not monitored_PV.put_complete:
         time.sleep(poll_time)
         #Run middle functions, in order
         for func,args in zip(middle_functions,middle_args):
             func(args)
-        waiting = not monitored_PV.put_complete
 
-def fmonitored_action(action_pv,readback_pv,action_value=1,desired_readback=1,sleep_time=1.0):
+def fmonitored_action(action_pv,readback_pv,action_value=1,desired_readback=1,
+                      sleep_time=1.0,wait_time=30.):
     '''Perform an action and wait for it to complete by monitoring another PV.
-    
     This is useful for beamline shutters in particular, since a put_complete
     doesn't work to monitor them.
     Inputs:
@@ -48,17 +44,17 @@ def fmonitored_action(action_pv,readback_pv,action_value=1,desired_readback=1,sl
     action_value: value to put to action_pv
     desired_readback: value we desire on the readback
     sleep_time: time to sleep between polls of the readback_pv
+    wait_time: time to wait until giving up
     '''
-    waiting = 0
     #If this is already a PV object, just put a value to it.
     if isinstance(action_pv,epics.pv.PV):
         action_pv.put(action_value)
     #If it isn't already a PV, assume it's a string and just caput
     else:
         epics.caput(action_pv,action_value)
-    while waiting < 30:
-        time.sleep(1)
-        waiting += 1
+    while wait_time > 0:
+        time.sleep(sleep_time)
+        wait_time -= sleep_time
         if readback_pv.value == desired_readback:
             logging.info("Action completed in fmonitored_action.")
             return
@@ -79,40 +75,28 @@ def fcheck_for_good_beam(action_PV=None,good_beam_value=0,bad_beam_value=1):
     For example, one could pause a scan. 
     '''
     #If the action_PV is set already, it must have been set manually.
-    manual_pause = False            #Variable to keep track if action_PV was set manually
-    if action_PV and action_PV.value == bad_beam_value:
-        manual_pause = True
-        print "Manual pause"
+    manual_pause = action_PV and action_PV.value == bad_beam_value
     
-    #If we have bad beam conditions, throw a software pause
-    software_pause = False
-    if fcheck_for_bad_beam():
-        software_pause = True
-        print "Software pause"
-    
-    while software_pause or manual_pause:
-        #If this is a manual pause, just wait for 1 s.  Release manual pause if pause button was pressed.  
-        if manual_pause: 
-            print action_PV.value 
-            if action_PV.value == good_beam_value:
-                print "Manual pause rescinded."
-                manual_pause = False
-                continue
+    while fcheck_for_bad_beam() or manual_pause:
+        #If we had a manual pause and the action_PV is at the good beam value,
+        #the pause must have been rescinded.
+        if action_PV.value == good_beam_value and manual_pause:
+            print("Manual pause rescinded.")
+            manual_pause = False
             time.sleep(1.0)
+            continue
         #If not manually paused, check for whether good beam conditions exist.
-        elif not fcheck_for_bad_beam():
-            print "Resuming operations."
+        if not fcheck_for_bad_beam() and not manual_pause:
+            print("Resuming operations.")
             #Unpause the scan if it is paused
             if action_PV and action_PV.value == bad_beam_value:
                 action_PV.value = good_beam_value
-            software_pause = False
+            time.sleep(1.0)
             return
         else:
             #If the scan isn't paused yet, pause it.
             if action_PV and action_PV.value == good_beam_value:
                 action_PV.value = bad_beam_value
-            software_pause = True
-            print "Software pause initiated"
             #Try to open the shutters
             fopen_shutters()
             #Wait so I don't crash the crate      
@@ -154,7 +138,8 @@ def fautomated_repeated_scan(scan_name='7bmb1:scan1'):
                 print("In the repeat loop")
                 #Monitor for good beam
                 while epics.caget("S:SRcurrentAI.VAL") < 30.0 or epics.caget('PA:07BM:STA_A_BEAMREADY_PL.VAL') < 0.5:
-                    print("Waiting for the beam to come back up.")
+                    print("Waiting for beam to come back at time " 
+                          + time.strftime('%H:%M:%S',time.localtime()))
                     time.sleep(5.0)
                 #Check to make sure we haven't clicked "Done" on repeated_scan_busy to abort this.
                 if repeated_scan_busy_PV.value == 0:
@@ -171,16 +156,19 @@ def fautomated_repeated_scan(scan_name='7bmb1:scan1'):
             repeated_scan_busy_PV.value = 0
             time.sleep(0.5)
         if counter == 1000:
-            print "Looking for repeated scan busy at time " + time.strftime('%H:%M:%S',time.localtime())
+            print("Looking for repeated scan busy at time " + time.strftime('%H:%M:%S',time.localtime()))
             counter = 0
         else:
             counter += 1
         time.sleep(0.01)
 
-def fautomated_repeated_scan_busy(busy_name='7bmb1:busy5'):
+def fautomated_repeated_scan_busy(trigger_busy='7bmb1:busy4',
+                                  action_name='7bmb1:busy5',
+                                  action_value='Busy',
+                                  shutter='A'):
     '''Performs a repeated scan.
     '''
-    repeated_scan_busy_PV = epics.PV('7bmb1:busy4')
+    repeated_scan_busy_PV = epics.PV(trigger_busy)
     counter = 0
     try:
         while True:
@@ -193,15 +181,19 @@ def fautomated_repeated_scan_busy(busy_name='7bmb1:busy5'):
                     print("In the repeat loop on scan #{:3d}".format(i))
                     #Monitor for good beam
                     while epics.caget("S:SRcurrentAI.VAL") < 30.0 or epics.caget('PA:07BM:STA_A_BEAMREADY_PL.VAL') < 0.5:
-                        print("Waiting for the beam to come back up.")
+                        print("Waiting for beam to come back at time " 
+                              + time.strftime('%H:%M:%S',time.localtime()))
                         time.sleep(5.0)
-                    fopen_A_shutter()
+                    if shutter == 'A':
+                        fopen_A_shutter()
+                    else:
+                        fopen_shutters()
                     #Start the scan
-                    epics.caput(busy_name,'Busy')
+                    epics.caput(action_name,action_value)
                     time.sleep(1.0)
-                    for __ in range(int(sec_between_pts)):
+                    for t in range(int(sec_between_pts),0,-1):
                         #Check to make sure we haven't clicked "Done" on repeated_scan_busy to abort this.
-                        print("Waiting for the next scan.")                        
+                        print("Waiting for the next scan, {0:d} s left.".format(t))                        
                         if repeated_scan_busy_PV.value == 0:
                             print("Scan aborted!")
                             break
@@ -216,7 +208,10 @@ def fautomated_repeated_scan_busy(busy_name='7bmb1:busy5'):
             time.sleep(0.01)
     finally:
         print("Problem in repeated scan loop.")
-        fclose_A_shutter()
+        if shutter == 'A':
+            fclose_A_shutter()
+        else:
+            fclose_B_shutter()
 
 def fscan_2D_separate_files(scan_motor,motor_points,scan_button,scan_pause_button):
     '''Perform a scan through a list of motor positions, running a scan at each
@@ -316,44 +311,6 @@ def AutorangeAllADC():
     fautorange_BIM_ADC()
     fautorange_PIN_ADC()
 
-def PSO_SetupScan(motor='7bmb1:aero:m1',mcs='7bmb1:3820',scan='7bmb1:scan1',speed=1,delta=.1, start=0,end=1):
-    '''Script to set up the scan for Ensemble PSO fly scans.
-    '''
-    #Get motor accel time in s
-    motor_accl = epics.caget(motor+'.ACCL')
-    #Figure out whether motion is in positive or negative direction in user coordinates
-    user_direction = 1 if end > start else -1
-    #Get the distance needed for acceleration = 1/2 a t^2 = 1/2 * v * a
-    accelDist = motor_accl*speed/2                    
-    #Make taxi distance an integral number of measurement deltas >= accel distance
-    #Add 1/2 of a delta, since we want integration centered on start and end.
-    taxiDist = math.ceil(accelDist/delta)*delta
-    taxiPos = start-(taxiDist+0.5*delta)*user_direction
-    motorEnd = end+accelDist*user_direction
-    #Increase range very slightly to avoid roundoff issues
-    num_points = math.floor(math.fabs(start-end)*1.0001/delta)+1
-    print taxiPos,motorEnd,num_points
-    
-    #Set up the scan record parameters
-    epics.caput(scan+'.P1SP',taxiPos, wait=True, timeout=300.0)
-    epics.caput(scan+'.P1EP',motorEnd, wait=True, timeout=300.0)
-    epics.caput(scan+'.NPTS',num_points, wait=True, timeout=300.0)
-    epics.caput(scan+'.P1SM', 2, wait=True, timeout=300.0)
-    epics.caput(scan+'.T1PV',mcs+':EraseStart', wait=True, timeout=300.0)
-    for i in [2,3,4]:
-        epics.caput(scan+'.T'+str(i)+'PV',"", wait=True, timeout=300.0)
-    epics.caput(scan+'.ACQT',1, wait=True, timeout=300.0)
-
-    #Set up the MCS
-    epics.caput(mcs+':NuseAll',num_points, wait=True, timeout=300.0)
-    
-    #Set up an array calc for the positions
-    epics.caput('7bmb1:userArrayCalc1.A',delta, wait=True, timeout=300.0)
-    epics.caput('7bmb1:userArrayCalc1.B',start, wait=True, timeout=300.0)
-    epics.caput('7bmb1:userArrayCalc1.NUSE',num_points, wait=True, timeout=300.0)
-    epics.caput('7bmb1:userArrayCalc1.CALC','IX*A+B',wait=True,timeout=300.0)
-    epics.caput('7bmb1:userArrayCalc1.PROC',1, wait=True, timeout=300.0)
-
 def Pilatus_Monitor_Daemon(setup_busy='7bmb1:busy1'):
     '''Does PSO_Monitor_Daemon for tomography fly scans.
     '''
@@ -381,6 +338,26 @@ def Pilatus_Monitor_Daemon(setup_busy='7bmb1:busy1'):
         else:
             counter += 1
         time.sleep(0.01)    
+
+def finit_motor(motor_num,prefix='7bmb1:m',new_value=0,use_dial=True):
+    '''Use to set the dial coordinate of a motor to zero.
+    Specifically, do this without changing the user/dial offset, so this
+    is suitable for using a limit switch as a home.
+    Suitable for stepper motor stages.
+    Inputs:
+    motor_num: the number of the motor
+    prefix: everything before the motor number to make a valid PV (default: 7bmb1:m)
+    new_value: new value of the dial coordinate (default: 0)
+    use_dial: do this in dial (default, True) or user coordinates
+    '''
+    motor_obj = epics.Motor(prefix+str(motor_num))
+    #Freeze the offset
+    motor_obj.freeze_offset = 1
+    #Go into set mode
+    motor_obj.set_position(new_value,dial=use_dial)
+    #Unfreeze the offset
+    motor_obj.freeze_offset = 0
+    
 
 def fnorm_v_mirror_translation(new_value=0):
     for i in [41,44]:
