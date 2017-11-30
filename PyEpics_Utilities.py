@@ -361,7 +361,7 @@ def finit_motor(motor_num,prefix='7bmb1:m',new_value=0,use_dial=True):
     motor_obj.freeze_offset = 0
     time.sleep(0.2)
     
-def finit_slits(top=57,bottom=58,inside=59,outside=60,prefix='7bmb1:m',size=15):
+def finit_slits(top=57,bottom=58,inside=59,outside=60,prefix='7bmb1:m',size=14):
     '''Initializes a set of slits that have been powered off.
     Sets all slit blades to their - limit, zeros the dial, and
     opens the slits fully.
