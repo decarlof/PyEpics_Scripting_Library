@@ -353,11 +353,37 @@ def finit_motor(motor_num,prefix='7bmb1:m',new_value=0,use_dial=True):
     motor_obj = epics.Motor(prefix+str(motor_num))
     #Freeze the offset
     motor_obj.freeze_offset = 1
+    time.sleep(0.2)
     #Go into set mode
     motor_obj.set_position(new_value,dial=use_dial)
+    time.sleep(0.2)
     #Unfreeze the offset
     motor_obj.freeze_offset = 0
+    time.sleep(0.2)
     
+def finit_slits(top=57,bottom=58,inside=59,outside=60,prefix='7bmb1:m',size=15):
+    '''Initializes a set of slits that have been powered off.
+    Sets all slit blades to their - limit, zeros the dial, and
+    opens the slits fully.
+    Inputs:
+    top,bottom,inside,outside: numbers of appropriate motors
+    prefix: PV prefix for the motors.
+    size: fully open size on each side of zero.
+    '''
+    for motor_number in [top,bottom,inside,outside]:
+        #Move the motor to a very negative position
+        motor_obj = epics.Motor(prefix+str(motor_number))
+        motor_obj.move(-size*3,wait=True)
+        #Move + 1 mm, then back in small steps to more accurately hit limit
+        motor_obj.move(1.0,relative=True,wait=True)
+        hit_limit = 0
+        while not hit_limit:
+            hit_limit = motor_obj.move(-0.1,relative=True,wait=True)
+        #Init motor
+        finit_motor(motor_number,prefix=prefix)
+        #Move the top and inside blades to open the slits
+        if motor_number == top or motor_number == bottom:
+            motor_obj.move(size,wait=True)
 
 def fnorm_v_mirror_translation(new_value=0):
     for i in [41,44]:
