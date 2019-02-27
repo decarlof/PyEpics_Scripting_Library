@@ -75,32 +75,27 @@ def fcheck_for_good_beam(action_PV=None,good_beam_value=0,bad_beam_value=1):
     For example, one could pause a scan. 
     '''
     #If the action_PV is set already, it must have been set manually.
-    manual_pause = action_PV and action_PV.value == bad_beam_value
+    manual_pause = False            #Variable to keep track if action_PV was set manually
+    if action_PV and action_PV.value == bad_beam_value:
+        manual_pause = True
+        print("Manual pause")
     
+    #Check for either a bad beam or a manual pause 
     while fcheck_for_bad_beam() or manual_pause:
-        #If we had a manual pause and the action_PV is at the good beam value,
-        #the pause must have been rescinded.
-        if action_PV.value == good_beam_value and manual_pause:
-            print("Manual pause rescinded.")
-            manual_pause = False
+        #If this is a manual pause, just wait for 1 s.  Release manual pause if pause button was pressed.  
+        if manual_pause: 
+            print(action_PV.value)
+            if action_PV.value == good_beam_value:
+                print("Manual pause rescinded.")
+                manual_pause = False
+                continue
             time.sleep(1.0)
-            continue
-        #If not manually paused, check for whether good beam conditions exist.
-        if not fcheck_for_bad_beam() and not manual_pause:
-            print("Resuming operations.")
-            #Unpause the scan if it is paused
-            if action_PV and action_PV.value == bad_beam_value:
-                action_PV.value = good_beam_value
-            time.sleep(1.0)
-            return
-        else:
-            #If the scan isn't paused yet, pause it.
-            if action_PV and action_PV.value == good_beam_value:
-                action_PV.value = bad_beam_value
-            #Try to open the shutters
-            fopen_shutters()
-            #Wait so I don't crash the crate      
-            time.sleep(1)
+    #At this point, we have a good beam.  Set the action_PV appropriately.
+    if action_PV and action_PV.value == bad_beam_value:
+        print('Resuming operations.')
+        fopen_shutters()
+        time.sleep(2.0)
+        action_PV.value = good_beam_value
 
 def fsimple_repeated_scan(num_times,scan_name='7bmb1:scan1',wait_time = 1.0):
     '''Simply repeat a scan num_times times.  Check for shutter and stored beam.
@@ -389,31 +384,11 @@ def finit_slits(top=57,bottom=58,inside=59,outside=60,prefix='7bmb1:m',size=14):
 
 def fnorm_v_mirror_translation(new_value=0):
     for i in [41,44]:
-        prefix = '7bmb1:m' + str(i)
-        epics.caput(prefix + '.FOFF',0,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.SET',1,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.VAL',new_value,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.SET',0,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.FOFF',1,wait=True,timeout=10.0)
-        time.sleep(0.05)
-
+        finit_motor(i,new_value=new_value,use_dial=False)
+        
 def fnorm_h_mirror_translation(new_value=0):
     for i in [45,48]:
-        prefix = '7bmb1:m' + str(i)
-        epics.caput(prefix + '.FOFF',0,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.SET',1,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.VAL',new_value,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.SET',0,wait=True,timeout=10.0)
-        time.sleep(0.05)
-        epics.caput(prefix + '.FOFF',1,wait=True,timeout=10.0)
-        time.sleep(0.05)
+        finit_motor(i,new_value=new_value,use_dial=False)
 
 def fnorm_slits(existing_center=True,blades=[61,62]):
     '''Calibrates the vertical slit opening for JJ slits.
