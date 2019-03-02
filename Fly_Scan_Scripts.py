@@ -214,7 +214,7 @@ class FlyScanPositions():
         epics.caput('7bmb1:userArrayCalc1.AVAL',
                     np.linspace(self.req_start, self.actual_end, self.PSO_positions.shape[0] - 1))
 
-def ftomo_fly_scan_daemonwb(trigger_busy = '7bmb1:busy5', 
+def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5', 
                     trigger_PVs={'7bm_pg1:cam1:Acquire':1}, cam_root = '7bm_pg1:'):
     '''Script to perform actions for WB tomography fly scan at 7-BM.
     Script waits for trigger_busy to be triggered.
@@ -457,7 +457,7 @@ def ffly_scan_daemon(fly_scan_func = ftomo_fly_scan_wb,
                     sec_wait = scan_end_time - start_time
                 else:
                     sec_wait = sec_between_pts - scan_end_time + start_time
-                print('Scan #{0:d} done.  Waiting {1:d} seconds for next scan.'
+                print('Scan #{0:d} done.  Waiting {1:d} seconds for next scan.')
                 if sec_wait < 1:
                     print('Already late for the next scan.  Start now.')
                     continue 
@@ -561,7 +561,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                         #Break so we can clean up
                         break
                     #Check if all of the triggered actions are complete
-                    if not epics.caget(scan_record + '.BUSY', wait=True)
+                    if not epics.caget(scan_record + '.BUSY', wait=True):
                         print("Finished scan.")
                         successful_scan = True
                         break
