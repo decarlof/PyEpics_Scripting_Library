@@ -196,7 +196,7 @@ def fautomated_repeated_scan_busy(trigger_busy='7bmb1:busy4',
                 repeated_scan_busy_PV.value = 0
                 time.sleep(0.5)
             if counter == 100:
-                print "Looking for repeated scan busy at time " + time.strftime('%H:%M:%S',time.localtime())
+                print("Looking for repeated scan busy at time " + time.strftime('%H:%M:%S',time.localtime()))
                 counter = 0
             else:
                 counter += 1
@@ -276,24 +276,24 @@ def fautorange_femto_ADC(ADC_board='7bm_dau1:dau:',channel=1,wait_time=2.0,
         #Wait for a moment
         time.sleep(wait_time)
         #Compute the voltage
-        print "Femto Gain Index = " + str(femto_gain.value)
-        print "Amp voltage = " + str(amp_output.value) + " V"
+        print("Femto Gain Index = " + str(femto_gain.value))
+        print("Amp voltage = " + str(amp_output.value) + " V")
         if amp_output.value > threshold_high:
             if femto_gain.value == 0:
-                print "Already at lowest gain.  Leaving it here."
+                print("Already at lowest gain.  Leaving it here.")
                 optimum_gain = True
             else:
                 femto_gain.value = femto_gain.value - 1
                 continue
         elif amp_output.value < threshold_low:
             if femto_gain.value == 5:
-                print "Already at highest gain.  Leaving it here."
+                print("Already at highest gain.  Leaving it here.")
                 optimum_gain = True
             else:
                 femto_gain.value = femto_gain.value + 1
                 continue
         #If we get here, the gain is optimal
-        print "Gain optimal."
+        print("Gain optimal.")
         optimum_gain = True
 
 def fautorange_BIM_ADC():
@@ -328,7 +328,7 @@ def Pilatus_Monitor_Daemon(setup_busy='7bmb1:busy1'):
             counter = 0
             time.sleep(0.2)
         if counter == 1000:
-            print "Looking for busys at time " + time.strftime('%H:%M:%S',time.localtime())
+            print("Looking for busys at time " + time.strftime('%H:%M:%S',time.localtime()))
             counter = 0
         else:
             counter += 1

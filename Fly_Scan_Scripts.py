@@ -29,7 +29,7 @@ class AerotechDriver():
         '''Performs programming of PSO output on the Aerotech driver.
         '''
         #Place the motor at the position where the first PSO pulse should be triggered
-        self.motor.move(fly_scan_pos.PSO_positions[0])
+        self.motor.move(fly_scan_pos.PSO_positions[0], wait=True)
 
         #Make sure the PSO control is off
         self.asynRec.put('PSOCONTROL %s RESET' % self.axis, wait=True, timeout=300.0)
@@ -77,7 +77,7 @@ class AerotechDriver():
         self.asynRec.put('PSOCONTROL %s ARM' % self.axis, wait=True, timeout=300.0)
         #Move to the actual start position and set the motor speed
         self.motor.move(fly_scan_pos.motor_start, wait=True)
-        self.motor.put('slew_speed', fly_scan_pos.speed, wait=True)
+        self.motor.put('VELO', fly_scan_pos.speed, wait=True)
 
     def fcleanup_PSO(self):
         '''Cleanup activities after a PSO scan. 
@@ -85,7 +85,7 @@ class AerotechDriver():
         '''
         self.asynRec.put('PSOWINDOW %s OFF' % self.axis, wait=True)
         self.asynRec.put('PSOCONTROL %s OFF' % self.axis, wait=True)
-        self.motor.put('slew_speed', self.default_speed, wait=True)
+        self.motor.put('VELO', self.default_speed, wait=True)
  
 
 Aerotech_Y = AerotechDriver(motor='7bmb1:aero:m1', asynRec='7bmb1:PSOFly1:cmdWriteRead', axis='Z', PSOInput=3, encoder_multiply=1e5)
@@ -105,10 +105,10 @@ class FlyScanPositions():
     '''    
     def __init__(self, driver=Aerotech_Y, speed=1, start=0, end=1, delta=0.1):
         self.driver = driver
-        self.speed = speed
-        self.req_start = start
-        self.req_end = end
-        self.req_delta = delta
+        self.speed = float(speed)
+        self.req_start = float(start)
+        self.req_end = float(end)
+        self.req_delta = float(delta)
     
     def fcompute_positions_MCS(self):
         '''Computes several parameters describing the fly scan motion.
@@ -214,7 +214,7 @@ class FlyScanPositions():
         epics.caput('7bmb1:userArrayCalc1.AVAL',
                     np.linspace(self.req_start, self.actual_end, self.PSO_positions.shape[0] - 1))
 
-def ftomo_fly_scan_daemonwb(trigger_busy = '7bmb1:busy5', 
+def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5', 
                     trigger_PVs={'7bm_pg1:cam1:Acquire':1}, cam_root = '7bm_pg1:'):
     '''Script to perform actions for WB tomography fly scan at 7-BM.
     Script waits for trigger_busy to be triggered.
@@ -264,15 +264,16 @@ def ftomo_fly_scan_daemonwb(trigger_busy = '7bmb1:busy5',
         while True:
             #If we are starting a scan ...
             if trigger_busy_PV.value == 1:
+                print("Triggered to take a tomo scan now.")
                 #Set the retrace speed on the Aerotech driver
-                Aerotech_Theta.default_speed = float(retrace_PV.get(wait=True))
+                Aerotech_Theta.default_speed = float(retrace_PV.get())
                 #Clean up the PSO programming in case things are messed up.
                 Aerotech_Theta.fcleanup_PSO()
                 #Set up the object with fly scan positions
-                fly_scan_pos = Fly_Scan_Positions(Aerotech_Theta, speed_PV.value, start_PV.value, end_PV.value, delta_PV.value)
+                fly_scan_pos = FlyScanPositions(Aerotech_Theta, speed_PV.value, start_PV.value, end_PV.value, delta_PV.value)
                 fly_scan_pos.fcompute_positions_tomo()
                 #Check that all positions will be within the motor limits.  If not, throw an exception
-                if not (sample_x_motor.within_limits(bright_x_pos) and sample_y_motor.within_limits(bright_y_pos)):
+                if not (sample_x_motor.within_limits(bright_x_pos.value) and sample_y_motor.within_limits(bright_y_pos.value)):
                     print('Bright position not within motor limits.  Check motor limits.')
                     raise ValueError
                 if not Aerotech_Theta.motor.within_limits(fly_scan_pos.motor_start):
@@ -343,10 +344,10 @@ def ftomo_fly_scan_daemonwb(trigger_busy = '7bmb1:busy5',
                 num_images_PV.put(fly_scan_pos.PSO_positions.shape[0], wait=True)
                 #Set up the HDF plugin to stream images to HDF5.
                 #write data to /exchange/data in HDF5 file by passing 0 flag to 'FrameType'
-                epics.caput(trig_root+'cam1:FrameType',0)
+                epics.caput(cam_root+'cam1:FrameType',0)
                 #Make sure camera is on external trigger mode, multiple exposures
-                epics.caput(trig_root+'cam1:ImageMode',1,wait=True)
-                epics.caput(trig_root+'cam1:TriggerMode',3,wait=True)
+                epics.caput(cam_root+'cam1:ImageMode',1,wait=True)
+                epics.caput(cam_root+'cam1:TriggerMode',3,wait=True)
                 time.sleep(0.5)
                 #Program the PSO for this motion
                 fly_scan_pos.fprogram_PSO()
@@ -407,9 +408,11 @@ def ftomo_fly_scan_daemonwb(trigger_busy = '7bmb1:busy5',
                 time.sleep(0.5)
                 #Break out of the while loop: we are done
                 break
-            time.sleep(0.05)
+            else:
+                time.sleep(0.05)
     finally:
         peu.fclose_A_shutter()
+        trigger_busy_PV.put('Done')
     return successful_scan
   
 
@@ -434,6 +437,7 @@ def ffly_scan_daemon(fly_scan_func = ftomo_fly_scan_wb,
             fly_scan_func()
         #If we see the repeat_busy, that means to multiple scans.
         if repeated_scan_busy_PV.value == 1:
+            print(epics.caget('7bmb1:var:int1'))
             num_repeats = int(epics.caget('7bmb1:var:int1'))
             sec_between_pts = float(epics.caget('7bmb1:var:float6'))
             for i in range(num_repeats):
@@ -442,14 +446,22 @@ def ffly_scan_daemon(fly_scan_func = ftomo_fly_scan_wb,
                     break
                 print("In the repeat loop on scan #{:3d}".format(i))
                 #Monitor for good beam
-                fcheck_for_bad_beam() 
+                #peu.fcheck_for_good_beam() 
+                #print("We must have good beam.")
                 #Start the scan
+                epics.caput(trigger_busy, 'Busy')
+                time.sleep(0.5)
+                print("Trigger busy triggered.")
                 successful_scan = fly_scan_func() 
                 #If the scan was bad, abort.
                 if not successful_scan:
                     print("Aborting repeated scan: bad individual fly scan encountered.")
                     repeated_scan_busy_PV.value = 0
-                break 
+                    break
+                #If this was the last scan, stop here
+                if i == num_repeats - 1:
+                    print("Done with repeated scans.")
+                    break 
                 #When scan is done, record the time
                 scan_end_time = time.time()
                 sec_wait = 0 
@@ -457,20 +469,20 @@ def ffly_scan_daemon(fly_scan_func = ftomo_fly_scan_wb,
                     sec_wait = scan_end_time - start_time
                 else:
                     sec_wait = sec_between_pts - scan_end_time + start_time
-                print('Scan #{0:d} done.  Waiting {1:d} seconds for next scan.'
+                print('Scan #{0:d} done.  Waiting {1:f} seconds for next scan.'.format(i, sec_wait))
                 if sec_wait < 1:
                     print('Already late for the next scan.  Start now.')
                     continue 
-                for __ in range(int(sec_wait)):
+                for i in range(int(sec_wait),0, -1):
                     #Check to make sure we haven't clicked "Done" on repeated_scan_busy to abort this.
-                    print("Waiting for the next scan.")                        
+                    print("Waiting for the next scan, {:d} s left.".format(i))                        
                     if repeated_scan_busy_PV.value == 0:
                         print("Scan aborted!")
                         break
                     time.sleep(1.0)
             repeated_scan_busy_PV.value = 0
             time.sleep(0.5)
-        if counter == 100:
+        if counter == 500:
             print("Looking for repeated scan busy at time " + time.strftime('%H:%M:%S',time.localtime()))
             counter = 0
         else:
@@ -480,12 +492,12 @@ def ffly_scan_daemon(fly_scan_func = ftomo_fly_scan_wb,
 def ffly_scan_daemon_tomo(trigger_busy='7bmb1:busy5', 
                                 repeat_busy='7bmb1:busy4',
                                 time_end_start=True):
-    return fauto_repeated_fly(ftomo_fly_scan_wb, trigger_busy, repeat_busy, time_end_start)
+    return ffly_scan_daemon(ftomo_fly_scan_wb, trigger_busy, repeat_busy, time_end_start)
 
 def ffly_scan_daemon_mcs(trigger_busy='7bmb1:busy5', 
                                 repeat_busy='7bmb1:busy4',
                                 time_end_start=True):
-    return fauto_repeated_fly(fmcs_fly_scan, trigger_busy, repeat_busy, time_end_start)
+    return ffly_scan_daemon(fmcs_fly_scan, trigger_busy, repeat_busy, time_end_start)
 
  
 def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
@@ -517,12 +529,13 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
         while True:
             #If we are starting a scan ...
             if trigger_busy_PV.value == 1:
+                print("Triggerd to take a scan now.")                
                 #Set the retrace speed on the Aerotech driver
-                driver.default_speed = float(retrace_PV.get(wait=True))
+                driver.default_speed = float(retrace_PV.get())
                 #Clean up the PSO programming in case things are messed up.
                 driver.fcleanup_PSO()
                 #Set up the object with fly scan positions
-                fly_scan_pos = Fly_Scan_Positions(driver, speed_PV.value, 
+                fly_scan_pos = FlyScanPositions(driver, speed_PV.value, 
                                     start_PV.value, end_PV.value, delta_PV.value)
                 fly_scan_pos.fcompute_positions_mcs()
                 fly_scan_pos.fprogram_scan_record(scan_record, mcs)
@@ -535,6 +548,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                     raise ValueError
                 #Program the PSO for this motion
                 fly_scan_pos.fprogram_PSO()
+                print("PSO programmed.")
                 #Open the shutters
                 peu.fopen_shutters()
                 #Compute how long it should take to save data set
@@ -561,7 +575,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                         #Break so we can clean up
                         break
                     #Check if all of the triggered actions are complete
-                    if not epics.caget(scan_record + '.BUSY', wait=True)
+                    if not epics.caget(scan_record + '.BUSY', wait=True):
                         print("Finished scan.")
                         successful_scan = True
                         break
