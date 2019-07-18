@@ -341,7 +341,6 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                 #move back to previous motor position & exposure time.
                 sample_x_motor.move(origx, wait=True)
                 sample_y_motor.move(origy, wait=True)
-                exposure_time_PV.put(data_dark_exp_time, wait=True)
                 #Set up the number of images and put us in multiple exposure mode
                 num_images_PV.put(fly_scan_pos.PSO_positions.shape[0], wait=True)
                 #Set up the HDF plugin to stream images to HDF5.
@@ -350,7 +349,9 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                 #Make sure camera is on external trigger mode, multiple exposures
                 epics.caput(cam_root+'cam1:ImageMode',1,wait=True)
                 epics.caput(cam_root+'cam1:TriggerMode',3,wait=True)
-                time.sleep(0.5)
+                time.sleep(0.1)
+                exposure_time_PV.put(data_dark_exp_time, wait=True)
+                time.sleep(0.2)
                 #Program the PSO for this motion
                 fly_scan_pos.fprogram_PSO()
                 #Compute how long it should take to save data set
@@ -376,6 +377,7 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                         epics.caput(cam_root + 'HDF1:Capture',0,wait=True)
                         #Stop the motor
                         Aerotech_Theta.motor.put('stop_go', 0, wait=True)
+                        Aerotech_Theta.motor.move(Aerotech_Theta.motor.get_position(readback=True))
                         time.sleep(1.0)
                         Aerotech_Theta.motor.put('stop_go', 3, wait=True)
                         #Break so we can clean up
