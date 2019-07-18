@@ -371,11 +371,12 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                     if trigger_busy_PV.value == 0:
                         print("Aborting scan.")
                         #Stop the image acquisition
+                        peu.fclose_A_shutter()
                         epics.caput(cam_root + 'cam1:Acquire',0,wait=True)
                         epics.caput(cam_root + 'HDF1:Capture',0,wait=True)
                         #Stop the motor
                         Aerotech_Theta.motor.put('stop_go', 0, wait=True)
-                        time.sleep(0.2)
+                        time.sleep(1.0)
                         Aerotech_Theta.motor.put('stop_go', 3, wait=True)
                         #Break so we can clean up
                         break
