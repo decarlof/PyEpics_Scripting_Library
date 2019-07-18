@@ -273,7 +273,7 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                 fly_scan_pos = FlyScanPositions(Aerotech_Theta, speed_PV.value, start_PV.value, end_PV.value, delta_PV.value)
                 fly_scan_pos.fcompute_positions_tomo()
                 #Move to the requested start position now
-		Aerotech_Theta.motor.move(fly_scan_pos.req_start)
+                Aerotech_Theta.motor.move(fly_scan_pos.req_start)
 		#Check that all positions will be within the motor limits.  If not, throw an exception
                 if not (sample_x_motor.within_limits(bright_x_pos.value) and sample_y_motor.within_limits(bright_y_pos.value)):
                     print('Bright position not within motor limits.  Check motor limits.')
