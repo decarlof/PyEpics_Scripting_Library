@@ -272,7 +272,9 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                 #Set up the object with fly scan positions
                 fly_scan_pos = FlyScanPositions(Aerotech_Theta, speed_PV.value, start_PV.value, end_PV.value, delta_PV.value)
                 fly_scan_pos.fcompute_positions_tomo()
-                #Check that all positions will be within the motor limits.  If not, throw an exception
+                #Move to the requested start position now
+		Aerotech_Theta.motor.move(fly_scan_pos.req_start)
+		#Check that all positions will be within the motor limits.  If not, throw an exception
                 if not (sample_x_motor.within_limits(bright_x_pos.value) and sample_y_motor.within_limits(bright_y_pos.value)):
                     print('Bright position not within motor limits.  Check motor limits.')
                     raise ValueError
@@ -466,7 +468,7 @@ def ffly_scan_daemon(fly_scan_func = ftomo_fly_scan_wb,
                 scan_end_time = time.time()
                 sec_wait = 0 
                 if time_end_start:
-                    sec_wait = scan_end_time - start_time
+                    sec_wait = sec_between_pts
                 else:
                     sec_wait = sec_between_pts - scan_end_time + start_time
                 print('Scan #{0:d} done.  Waiting {1:f} seconds for next scan.'.format(i, sec_wait))
