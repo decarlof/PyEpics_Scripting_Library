@@ -185,7 +185,7 @@ class FlyScanPositions():
                     Encoder Counts / Pulse = {2:d}
                     EGU / Pulse = {3:f}'''.format(self.req_start, self.actual_end, self.delta_encoder_counts, self.delta_egu)
     
-    def fprogram_scan_record(scan_record='7bmb1:scan1', mcs='7bmb1:3820'):
+    def fprogram_scan_record(self,scan='7bmb1:scan1', mcs='7bmb1:3820:'):
         '''Programs the scan record for use in MCS fly scans.
         Sets the correct number of points, start, end, and scan settings.
         '''
@@ -197,14 +197,14 @@ class FlyScanPositions():
         #Set the scan record into fly scan mode
         epics.caput(scan+'.P1SM', 2, wait=True, timeout=300.0)
         #Make the only trigger PV the EraseStart PV for the MCS
-        epics.caput(scan+'.T1PV', mcs+':EraseStart', wait=True)
+        epics.caput(scan+'.T1PV', mcs+'EraseStart', wait=True)
         for i in [2,3,4]:
             epics.caput(scan+'.T'+str(i)+'PV', "", wait=True)
         #Set the detectors to 1D array mode
         epics.caput(scan+'.ACQT',1, wait=True, timeout=300.0)
 
         #Set up the number of points that we will use for the MCS
-        epics.caput(mcs+':NuseAll',num_points, wait=True, timeout=300.0)
+        epics.caput(mcs+'NuseAll', len(self.PSO_positions) - 1, wait=True, timeout=300.0)
         #Set up the channel advance to come from an external source, no prescale
         epics.caput(mcs + 'ChannelAdvance', 1, wait=True)
         epics.caput(mcs + 'Prescale', 1, wait=True)
@@ -273,7 +273,7 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
                 fly_scan_pos = FlyScanPositions(Aerotech_Theta, speed_PV.value, start_PV.value, end_PV.value, delta_PV.value)
                 fly_scan_pos.fcompute_positions_tomo()
                 #Move to the requested start position now
-                Aerotech_Theta.motor.move(fly_scan_pos.req_start, use_complete=True)
+                Aerotech_Theta.motor.move(fly_scan_pos.req_start)
 		#Check that all positions will be within the motor limits.  If not, throw an exception
                 if not (sample_x_motor.within_limits(bright_x_pos.value) and sample_y_motor.within_limits(bright_y_pos.value)):
                     print('Bright position not within motor limits.  Check motor limits.')
@@ -324,7 +324,7 @@ def ftomo_fly_scan_wb(trigger_busy = '7bmb1:busy5',
 
                 #Capture bright fields
                 #Make sure that the retrace is done.
-                while not Aerotech_Theta.motor.put_complete:
+                while not Aerotech_Theta.motor.done_moving:
                     time.sleep(0.1)
                 peu.fopen_A_shutter()
                 #Move to correct x and y position
@@ -509,7 +509,7 @@ def ffly_scan_daemon_mcs(trigger_busy='7bmb1:busy5',
 
  
 def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
-                    driver=Aerotech_Y, mcs='7bmb1:3820'):
+                    driver=Aerotech_X, mcs='7bmb1:3820:'):
     '''Script to perform actions for MCS fly scans at 7-BM.
     Script waits for trigger_busy to be triggered.
     The scan then programs the stage for PSO output, checks that scan motor is
@@ -528,6 +528,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
     start_PV = epics.PV('7bmb1:var:float3')
     end_PV = epics.PV('7bmb1:var:float4')
     retrace_PV = epics.PV('7bmb1:var:float5')
+    trigger_busy_PV = epics.PV(trigger_busy)
     
     counter = 0
     #Have a flag variable to show if scan completed successfully.
@@ -545,7 +546,8 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                 #Set up the object with fly scan positions
                 fly_scan_pos = FlyScanPositions(driver, speed_PV.value, 
                                     start_PV.value, end_PV.value, delta_PV.value)
-                fly_scan_pos.fcompute_positions_mcs()
+                fly_scan_pos.fcompute_positions_MCS()
+                print(scan_record, mcs)
                 fly_scan_pos.fprogram_scan_record(scan_record, mcs)
                 #Check that all positions will be within the motor limits.  If not, throw an exception
                 if not driver.motor.within_limits(fly_scan_pos.motor_start):
@@ -563,7 +565,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                 total_time = (end_PV.value - start_PV.value) / speed_PV.value
                 print("Scan should take {:5.2f} s.".format(total_time))
                 #Trigger the scan
-                epics.caput(scan_record + '.EXSC', wait=False)
+                epics.caput(scan_record + '.EXSC', 1, wait=False)
                 start_time = time.time()
                 #Now, start looking at whether we've finished or have aborted.
                 counter = 0
@@ -583,7 +585,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                         #Break so we can clean up
                         break
                     #Check if all of the triggered actions are complete
-                    if not epics.caget(scan_record + '.BUSY', wait=True):
+                    if not epics.caget(scan_record + '.BUSY'):
                         print("Finished scan.")
                         successful_scan = True
                         break
@@ -611,6 +613,7 @@ def fMCS_fly_scan(trigger_busy = '7bmb1:busy5', scan_record='7bmb1:scan1',
                 trigger_busy_PV.put('Done',wait=True)
                 time.sleep(0.5)
                 print(trigger_busy_PV.value)
+                print('Scan finished.  Now waiting...')
             time.sleep(0.05)
     finally:
         peu.fclose_B_shutter()
