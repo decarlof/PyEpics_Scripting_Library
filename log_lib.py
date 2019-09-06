@@ -1,5 +1,5 @@
 '''
-    Log Lib for Sector 2-BM 
+    Log Lib for 7-BM 
     
 '''
 import logging
