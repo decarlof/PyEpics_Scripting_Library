@@ -151,6 +151,19 @@
           </group><!-- /setup -->
         </group><!-- /detector -->
       </group><!-- /instrument -->
+
+    <group name="sample">
+      <group name="experimenter">
+         <dataset name="name" source="ndattribute" ndattribute="UserName" when="OnFileClose" />
+         <dataset name="affiliation" source="ndattribute" ndattribute="UserAffiliation" when="OnFileClose" />
+         <dataset name="email" source="ndattribute" ndattribute="UserEmail" when="OnFileClose" />
+         <dataset name="facility_user_id" source="ndattribute" ndattribute="UserBadge" when="OnFileClose" />
+      </group><!-- /experimenter -->
+      <group name="experiment">
+         <dataset name="proposal" source="ndattribute" ndattribute="ProposalNumber" when="OnFileClose" />
+         <dataset name="title" source="ndattribute" ndattribute="ProposalTitle" when="OnFileClose" />
+      </group><!-- /experiment -->
+    </group><!-- /sample -->
       
       <group name="ancillary">
         <dataset name="MW100_ADC_01" source="ndattribute" ndattribute="MW100_ADC_01" when="OnFrame"> 
